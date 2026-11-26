@@ -1,6 +1,9 @@
 """Core RAG logic: read documents -> chunk -> embed -> retrieve -> ask the LLM."""
 import io
+import json
 import os
+import urllib.error
+import urllib.request
 
 import numpy as np
 from pypdf import PdfReader
@@ -8,7 +11,7 @@ from pypdf import PdfReader
 CHUNK_SIZE = 900      # characters per chunk
 CHUNK_OVERLAP = 150   # characters shared between neighbouring chunks
 TOP_K = 4             # how many chunks we send to the LLM
-MODEL = os.getenv("LLM_MODEL", "claude-haiku-5-5")
+MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")   # free-tier Gemini model
 
 _embedder = None
 
@@ -87,13 +90,25 @@ SYSTEM_PROMPT = (
 
 
 def ask_llm(question, sources):
-    import anthropic
+    """Ask Google Gemini (free tier). Needs GEMINI_API_KEY from aistudio.google.com."""
+    key = os.getenv("GEMINI_API_KEY")
+    if not key:
+        raise RuntimeError("GEMINI_API_KEY is not set")
     context = "\n\n".join(f"[{n}] ({s['doc']})\n{s['text']}" for n, s in enumerate(sources, 1))
-    client = anthropic.Anthropic()               # reads ANTHROPIC_API_KEY
-    reply = client.messages.create(
-        model=MODEL,
-        max_tokens=800,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": f"Sources:\n{context}\n\nQuestion: {question}"}],
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
+    payload = {
+        "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "contents": [{"role": "user", "parts": [{"text": f"Sources:\n{context}\n\nQuestion: {question}"}]}],
+        "generationConfig": {"maxOutputTokens": 1000},
+    }
+    req = urllib.request.Request(
+        url, data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", "x-goog-api-key": key},
     )
-    return reply.content[0].text
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Gemini error {e.code}: {e.read().decode()[:200]}")
+    parts = data["candidates"][0]["content"]["parts"]
+    return "".join(p.get("text", "") for p in parts)
