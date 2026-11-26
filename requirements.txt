@@ -4,4 +4,3 @@ python-multipart
 pypdf
 numpy
 fastembed>=0.4.1
-anthropic>=0.40.0
