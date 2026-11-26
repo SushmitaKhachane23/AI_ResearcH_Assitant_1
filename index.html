@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Research Assistant</title>
+<style>
+  :root { --bg:#f6f7fb; --card:#fff; --text:#1d2433; --muted:#667085; --accent:#4f46e5; --line:#e4e7ec; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1218; --card:#181c25; --text:#e8eaf0; --muted:#9aa3b2; --accent:#818cf8; --line:#2a3040; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width: 720px; margin: 0 auto; padding: 20px 16px 60px; }
+  h1 { font-size: 1.4rem; margin: 8px 0 4px; }
+  p.sub { color:var(--muted); margin:0 0 16px; font-size:.95rem; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:10px 14px; font-size:1rem; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); }
+  button:disabled { opacity:.5; }
+  input[type=text] { width:100%; padding:10px; font-size:1rem; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); margin-bottom:10px; }
+  .docs { color:var(--muted); font-size:.9rem; margin-top:8px; }
+  .answer { white-space:pre-wrap; line-height:1.5; }
+  .src { border-left:3px solid var(--accent); padding:6px 10px; margin-top:8px; font-size:.88rem; color:var(--muted); }
+  .src b { color:var(--text); }
+</style>
+</head>
+<body>
+<main>
+  <h1>AI Research Assistant</h1>
+  <p class="sub">Upload papers or notes (PDF, TXT, MD), then ask questions. Answers come with sources.</p>
+
+  <div class="card">
+    <input type="file" id="file" accept=".pdf,.txt,.md">
+    <button id="upBtn" onclick="upload()">Upload</button>
+    <button class="ghost" onclick="clearDocs()">Clear all</button>
+    <div class="docs" id="docs">No documents yet.</div>
+  </div>
+
+  <div class="card">
+    <input type="text" id="q" placeholder="Ask a question about your documents" onkeydown="if(event.key==='Enter')ask()">
+    <button id="askBtn" onclick="ask()">Ask</button>
+  </div>
+
+  <div class="card" id="out" style="display:none"></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+function showDocs(list) { $('docs').textContent = list.length ? 'Loaded: ' + list.join(', ') : 'No documents yet.'; }
+fetch('/documents').then(r => r.json()).then(d => showDocs(d.documents));
+
+async function upload() {
+  const f = $('file').files[0];
+  if (!f) return;
+  $('upBtn').disabled = true; $('docs').textContent = 'Reading and indexing...';
+  const fd = new FormData(); fd.append('file', f);
+  const r = await fetch('/upload', { method: 'POST', body: fd });
+  const d = await r.json();
+  $('upBtn').disabled = false;
+  if (!r.ok) { $('docs').textContent = d.detail; return; }
+  showDocs(d.documents);
+}
+
+async function clearDocs() {
+  const d = await (await fetch('/documents', { method: 'DELETE' })).json();
+  showDocs(d.documents); $('out').style.display = 'none';
+}
+
+async function ask() {
+  const q = $('q').value.trim();
+  if (!q) return;
+  $('askBtn').disabled = true; $('out').style.display = 'block'; $('out').textContent = 'Thinking...';
+  const r = await fetch('/ask', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({question: q}) });
+  const d = await r.json();
+  $('askBtn').disabled = false;
+  if (!r.ok) { $('out').textContent = d.detail; return; }
+  $('out').innerHTML = '<div class="answer">' + esc(d.answer) + '</div>' +
+    d.sources.map((s, i) => '<div class="src"><b>[' + (i+1) + '] ' + esc(s.doc) + '</b><br>' + esc(s.text.slice(0, 220)) + '...</div>').join('');
+}
+</script>
+</body>
+</html>
